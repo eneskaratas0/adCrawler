@@ -50,6 +50,19 @@ Veri `data/advisories.db` (SQLite) dosyasına yazılır, git'e dahil edilmez. Ba
 
 Tam DDL: [`crawler/schema.sql`](crawler/schema.sql). Şema değişiklikleri `PRAGMA user_version` tabanlı migrasyonlarla uygulanır ([`crawler/migrations.py`](crawler/migrations.py)) — mevcut veritabanları otomatik yükseltilir.
 
+## Yol Haritası
+
+Sıradaki işler, öncelik sırasıyla:
+
+- **Tarihsel backfill** — CISA'nın HTML listesi 506 sayfa (~5060 advisory) ile RSS'in kapsamadığı arşivi taşıyor. Önkoşul: istekler arası gecikme, kaldığı yerden devam, ilerleme takibi.
+- **Conditional GET** (ETag / If-Modified-Since) — her çalıştırmada tam indirmeyi önler; MSRC feed'i ~4500 item olduğu için belirgin kazanç.
+- **Retry/backoff** — geçici ağ hataları şu an tüm kaynağı düşürüyor.
+- **CISA KEV (JSON/CSV) ve ICS CSAF 2.0** — RSS'ten çok daha zengin, resmî makine-okunur kaynaklar.
+- **USOM / Siber Güvenlik Başkanlığı** — SPA olduğu için headless browser gerekiyor.
+- Vendor listesinin genişletilmesi (Fortinet, Palo Alto, VMware, Oracle, Adobe …).
+
+Ayrıntı ve açık sorular: [`docs/sources.md`](docs/sources.md).
+
 ## Geliştirme
 
 ```bash

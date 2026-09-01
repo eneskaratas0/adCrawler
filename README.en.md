@@ -50,6 +50,19 @@ Optional: if `ADVCRAWLER_CONTACT` is set, a contact address is added to the User
 
 Full DDL: [`crawler/schema.sql`](crawler/schema.sql). Schema changes ship as `PRAGMA user_version` migrations ([`crawler/migrations.py`](crawler/migrations.py)) — existing databases are upgraded automatically.
 
+## Roadmap
+
+Next up, in priority order:
+
+- **Historical backfill** — CISA's HTML listing spans 506 pages (~5060 advisories), an archive the RSS feed does not reach. Prerequisites: a delay between requests, resumability, progress tracking.
+- **Conditional GET** (ETag / If-Modified-Since) — avoids a full download on every run; a clear win for the MSRC feed at ~4500 items.
+- **Retry/backoff** — a transient network error currently fails the whole source.
+- **CISA KEV (JSON/CSV) and ICS CSAF 2.0** — official machine-readable sources, far richer than RSS.
+- **USOM / Turkish Cybersecurity Directorate** — an SPA, so it needs a headless browser.
+- Widening the vendor list (Fortinet, Palo Alto, VMware, Oracle, Adobe …).
+
+Details and open questions: [`docs/sources.md`](docs/sources.md).
+
 ## Development
 
 ```bash
