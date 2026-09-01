@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# Fetched Claude Code skill artifacts (reproducible from skills-lock.json)
+.claude/skills/
+
+# Unrelated nested tool with its own git history
+strix-claude-code/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
