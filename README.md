@@ -2,20 +2,22 @@
 
 *[English](README.en.md)*
 
-Güvenlik danışmanlığı (advisory) raporlarını çeşitli kaynaklardan (ulusal CERT'ler, vendor PSIRT'ler) toplayan bir crawler.
+Güvenlik danışmanlığı (advisory) raporlarını ulusal CERT'ler ve vendor PSIRT'lerinden toplayan bir crawler. Kayıtlar SQLite'a yazılır, advisory'lerde geçen CVE'ler çıkarılıp ilişkilendirilir.
 
-## Durum
+## Kaynaklar
 
-Proje erken aşamada. Şu ana kadar eklenenler:
+7 kaynak RSS/RDF üzerinden takip ediliyor:
 
-- `crawler/http_client.py` — tüm kaynak fetcher'larının paylaştığı, tanımlayıcı bir `User-Agent` gönderen ortak `httpx` client.
-- `crawler/cisa.py` — CISA (ABD) Cybersecurity Advisories için iki erişim yolu:
-  - `fetch_feed()`: resmi RSS feed'i (`all.xml`) çeker.
-  - `scrape_advisories()`: `https://www.cisa.gov/news-events/cybersecurity-advisories` sayfasını BeautifulSoup ile parse edip her advisory kartından başlık, link, tarih ve tip çıkarır.
-- `crawler/db.py` + `crawler/schema.sql` — SQLite kalıcılık katmanı (stdlib `sqlite3`, ORM yok). Kayıtlar `link` alanına göre upsert edilir: her çalıştırma üstüne yazmak yerine arşivi büyütür, `first_seen` korunur, `last_seen` güncellenir.
-- `crawler/errors.py` — `CrawlerError` hiyerarşisi (`FetchError`, `ParseError`, `StorageError`). Beklenen hatalar net mesaja ve çıkış kodu 1'e dönüşür; beklenmeyenler traceback verir.
+| Slug | Kaynak |
+|---|---|
+| `cisa` | CISA (ABD) — Alert, ICS Advisory, Cybersecurity Advisory |
+| `cert-eu` | CERT-EU (AB) |
+| `cert-fr-avis` / `cert-fr-alerte` | CERT-FR / ANSSI (Fransa) |
+| `jvn` | JVN / JPCERT/CC (Japonya) |
+| `msrc` | Microsoft MSRC |
+| `cisco` | Cisco PSIRT |
 
-Araştırılan/planlanan kaynaklar için bkz. [`docs/sources.md`](docs/sources.md).
+Yeni kaynak eklemek [`crawler/sources.py`](crawler/sources.py)'a bir satır eklemektir. Kaynak araştırması: [`docs/sources.md`](docs/sources.md).
 
 ## Kurulum
 
@@ -28,41 +30,49 @@ uv sync
 ## Kullanım
 
 ```bash
-# CISA advisories sayfasını scrape et, data/advisories.db'ye yaz ve listele
-uv run python -m crawler.cisa
+uv run advcrawler --list-sources     # kaynakları listele
+uv run advcrawler --source cisa      # tek kaynak
+uv run advcrawler --all              # tüm kaynaklar
 ```
 
-Veri `data/advisories.db` (SQLite) dosyasına yazılır, git'e dahil edilmez. Başarılı çalıştırma 0, hata durumunda 1 çıkış kodu döner — zamanlanmış çalıştırmada (cron/CI) hata bu şekilde yakalanabilir.
+Veri `data/advisories.db` (SQLite) dosyasına yazılır, git'e dahil edilmez. Başarılı çalıştırma 0, hata durumunda 1 çıkış kodu döner — zamanlanmış çalıştırmada (cron/CI) hata bu şekilde yakalanır. `--all` çalışırken bir kaynağın hatası diğerlerini durdurmaz.
 
-Eski `data/cisa.json` verisini taşımak için (tek seferlik):
-
-```bash
-uv run python -m scripts.migrate_json_to_sqlite
-```
+İsteğe bağlı: `ADVCRAWLER_CONTACT` tanımlıysa User-Agent'a iletişim adresi eklenir.
 
 ## Şema
 
 | Tablo | Amaç |
 |---|---|
-| `sources` | Kaynaklar (`cisa`, `cert-eu`, …) — çok kaynaklı yapı için |
+| `sources` | Kaynaklar (`cisa`, `cert-eu`, …) |
 | `advisories` | Advisory kayıtları; `link` benzersiz (tekilleştirme anahtarı), `first_seen`/`last_seen` izlenir |
-| `cves` + `advisory_cves` | CVE'ler ve advisory ilişkisi (çoka-çok). Şema hazır, doldurma detay sayfası parse edilince yapılacak |
+| `cves` + `advisory_cves` | Advisory başlık ve özetlerinden çıkarılan CVE'ler (çoka-çok) |
 | `crawl_runs` | Her çalıştırmanın kaydı: durum, yeni kayıt sayısı, hata mesajı |
 
-Tam DDL: [`crawler/schema.sql`](crawler/schema.sql)
+Tam DDL: [`crawler/schema.sql`](crawler/schema.sql). Şema değişiklikleri `PRAGMA user_version` tabanlı migrasyonlarla uygulanır ([`crawler/migrations.py`](crawler/migrations.py)) — mevcut veritabanları otomatik yükseltilir.
+
+## Geliştirme
+
+```bash
+uv run --group dev pytest      # testler (ağ erişimi gerekmez, fixture'larla çalışır)
+uv run --group dev ruff check .
+```
 
 ## Yapı
 
 ```
 crawler/
-  http_client.py   # ortak HTTP client (User-Agent) + fetch_text
-  cisa.py          # CISA RSS + HTML scraper
-  db.py            # SQLite kalıcılık (upsert, çalıştırma kaydı)
+  cli.py           # komut satırı arayüzü
+  pipeline.py      # kaynak çalıştırma akışı (fetch -> parse -> türet -> yaz)
+  sources.py       # kaynak tanımları
+  rss.py           # RSS 2.0 / RDF ayrıştırma (namespace'ten bağımsız)
+  cve.py           # CVE kimliği çıkarma
+  cisa.py          # CISA'ya özgü: kategori türetme + HTML scraper (backfill için)
+  db.py            # SQLite kalıcılık
+  migrations.py    # şema migrasyonları
   schema.sql       # tablo tanımları
+  http_client.py   # ortak HTTP client (User-Agent)
   errors.py        # CrawlerError hiyerarşisi
-scripts/
-  migrate_json_to_sqlite.py
-data/              # crawler çıktısı, SQLite dosyası (git'e dahil değil)
-docs/
-  sources.md       # kaynak araştırması (RSS/API/scraping durumları)
+tests/             # fixture'lar gerçek feed/HTML snapshot'ları
+data/              # SQLite dosyası (git'e dahil değil)
+docs/sources.md    # kaynak araştırması
 ```

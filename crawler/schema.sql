@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS advisories (
     published_at  TEXT,                       -- ISO 8601, kaynağın bildirdiği tarih
     category      TEXT,                       -- 'Alert', 'Cybersecurity Advisory'
     advisory_code TEXT,                       -- 'AA26-237A' (varsa)
+    summary       TEXT,                       -- feed description'ı (CVE'ler buradan çıkarılır)
     first_seen    TEXT NOT NULL,              -- crawler'ın ilk gördüğü an
     last_seen     TEXT NOT NULL               -- listede en son görüldüğü an
 );
@@ -45,7 +46,8 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
     source_id     INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     started_at    TEXT NOT NULL,
     finished_at   TEXT,
-    status        TEXT NOT NULL CHECK (status IN ('running', 'success', 'error')),
+    status        TEXT NOT NULL
+                  CHECK (status IN ('running', 'success', 'error', 'interrupted')),
     new_count     INTEGER,
     error_message TEXT
 );

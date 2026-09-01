@@ -1,27 +1,37 @@
-"""CISA Cybersecurity Advisories: RSS feed ve HTML sayfası çekme."""
+"""CISA Cybersecurity Advisories.
+
+Birincil yol RSS (`all.xml`): HTML listeleme sayfasından 3 kat fazla kayıt veriyor, ICS
+advisory'lerini de kapsıyor ve CSS seçicilerine bağımlı değil. HTML scraper ikincil yol
+olarak duruyor — tarihsel backfill (506 sayfa) onun üzerinden yapılacak.
+"""
 
 import logging
 import re
-import sys
-from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from crawler import db
-from crawler.errors import CrawlerError, ParseError
+from crawler.errors import ParseError
 from crawler.http_client import fetch_text
 
 FEED_URL = "https://www.cisa.gov/cybersecurity-advisories/all.xml"
 BASE_URL = "https://www.cisa.gov"
 HTML_LIST_URL = f"{BASE_URL}/news-events/cybersecurity-advisories"
-DB_PATH = Path("data/advisories.db")
 
 SOURCE_SLUG = "cisa"
 SOURCE_NAME = "CISA (ABD)"
 
-# 'AA26-237A' gibi advisory kodları; 'resource' gibi içerik etiketlerini dışarıda bırakır.
-ADVISORY_CODE_RE = re.compile(r"[A-Za-z]{1,5}\d{2}-\d+[A-Za-z]?")
+# İki kod biçimi: 'AA26-237A' (advisory) ve 'ICSA-26-239-05' (ICS).
+# 'resource' gibi rakamsız içerik etiketlerini dışarıda bırakır.
+ADVISORY_CODE_RE = re.compile(r"[A-Za-z]{1,5}-?\d{2}-\d+(?:-\d+)?[A-Za-z]?")
+
+# URL yolundan kategori: /news-events/<segment>/... eşlemesi.
+PATH_CATEGORIES = {
+    "alerts": "Alert",
+    "ics-advisories": "ICS Advisory",
+    "cybersecurity-advisories": "Cybersecurity Advisory",
+    "ics-medical-advisories": "ICS Medical Advisory",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +51,33 @@ def split_meta(meta: str | None) -> tuple[str | None, str | None]:
     return category.strip() or None, code
 
 
+def derive_category(link: str) -> tuple[str | None, str | None]:
+    """URL yolundan kategori ve advisory kodunu türetir.
+
+    /news-events/alerts/2026/08/31/<slug>      -> ('Alert', None)
+    /news-events/ics-advisories/icsa-26-239-05 -> ('ICS Advisory', 'ICSA-26-239-05')
+    /news-events/cybersecurity-advisories/aa26-237a -> ('Cybersecurity Advisory', 'AA26-237A')
+    /resources-tools/resources/<slug>          -> ('Resource', None)
+    """
+    parts = [p for p in urlparse(link).path.split("/") if p]
+    if not parts:
+        return None, None
+
+    if parts[0] == "resources-tools":
+        return "Resource", None
+
+    if parts[0] != "news-events" or len(parts) < 2:
+        return None, None
+
+    category = PATH_CATEGORIES.get(parts[1])
+    last = parts[-1]
+    code = last.upper() if ADVISORY_CODE_RE.fullmatch(last) else None
+    return category, code
+
+
+
 def scrape_advisories() -> list[dict[str, str | None]]:
+    """HTML listeleme sayfasını scrape eder (ikincil yol; backfill için korunuyor)."""
     soup = BeautifulSoup(fetch_text(HTML_LIST_URL), "html.parser")
 
     containers = soup.select("article.c-teaser")
@@ -80,37 +116,3 @@ def scrape_advisories() -> list[dict[str, str | None]]:
             "kart içi seçiciler değişmiş olabilir."
         )
     return advisories
-
-
-def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    # httpx her istek için INFO log basıyor; sadece sorun olduğunda duyalım.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-
-    conn = None
-    run_id = None
-    try:
-        conn = db.connect(DB_PATH)
-        source_id = db.get_or_create_source(conn, SOURCE_SLUG, SOURCE_NAME, HTML_LIST_URL)
-        run_id = db.start_run(conn, source_id)
-
-        scraped = scrape_advisories()
-        new_count = db.upsert_advisories(conn, source_id, scraped)
-        db.finish_run(conn, run_id, "success", new_count)
-
-        for advisory in db.list_advisories(conn, source_id):
-            print(f"{advisory['title']} -> {advisory['link']}")
-        logger.info("%d yeni kayıt — %s", new_count, DB_PATH)
-        return 0
-    except CrawlerError as exc:
-        logger.error("%s", exc)
-        if conn is not None and run_id is not None:
-            db.finish_run(conn, run_id, "error", error_message=str(exc))
-        return 1
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-if __name__ == "__main__":
-    sys.exit(main())

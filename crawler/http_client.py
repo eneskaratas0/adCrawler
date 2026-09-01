@@ -1,15 +1,24 @@
 """Tüm kaynak fetcher'larının paylaştığı, kimliğini belirten bir User-Agent gönderen HTTP client."""
 
+import os
+
 import httpx
 
 from crawler.errors import FetchError
 
-USER_AGENT = "AdvCrawler/0.1 (Security Advisory Aggregator; contact: set via ADVCRAWLER_CONTACT env var)"
+VERSION = "0.1"
+
+
+def build_user_agent() -> str:
+    """ADVCRAWLER_CONTACT tanımlıysa iletişim bilgisini ekler, yoksa hiç bahsetmez."""
+    contact = os.environ.get("ADVCRAWLER_CONTACT", "").strip()
+    contact_part = f"; +{contact}" if contact else ""
+    return f"AdvCrawler/{VERSION} (Security Advisory Aggregator{contact_part})"
 
 
 def get_client() -> httpx.Client:
     return httpx.Client(
-        headers={"User-Agent": USER_AGENT},
+        headers={"User-Agent": build_user_agent()},
         follow_redirects=True,
         timeout=15.0,
     )

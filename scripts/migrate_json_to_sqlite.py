@@ -11,8 +11,12 @@ import sys
 from pathlib import Path
 
 from crawler import db
-from crawler.cisa import DB_PATH, HTML_LIST_URL, SOURCE_NAME, SOURCE_SLUG, split_meta
+from crawler.cisa import split_meta
+from crawler.cli import DB_PATH
 from crawler.errors import CrawlerError
+from crawler.sources import BY_SLUG
+
+CISA = BY_SLUG["cisa"]
 
 JSON_PATH = Path("data/cisa.json")
 
@@ -36,7 +40,7 @@ def main() -> int:
         return 1
 
     try:
-        source_id = db.get_or_create_source(conn, SOURCE_SLUG, SOURCE_NAME, HTML_LIST_URL)
+        source_id = db.get_or_create_source(conn, CISA.slug, CISA.name, CISA.feed_url)
 
         migrated = 0
         with conn:

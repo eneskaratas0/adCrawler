@@ -2,20 +2,22 @@
 
 *[Türkçe](README.md)*
 
-A crawler that collects security advisory reports from various sources (national CERTs, vendor PSIRTs).
+A crawler that collects security advisory reports from national CERTs and vendor PSIRTs. Records are stored in SQLite, and CVEs mentioned in advisories are extracted and linked.
 
-## Status
+## Sources
 
-The project is at an early stage. Added so far:
+Seven sources are tracked over RSS/RDF:
 
-- `crawler/http_client.py` — a shared `httpx` client, used by all source fetchers, that sends a descriptive `User-Agent`.
-- `crawler/cisa.py` — two ways to pull CISA (US) Cybersecurity Advisories:
-  - `fetch_feed()`: fetches the official RSS feed (`all.xml`).
-  - `scrape_advisories()`: parses `https://www.cisa.gov/news-events/cybersecurity-advisories` with BeautifulSoup and extracts the title, link, date and type from each advisory card.
-- `crawler/db.py` + `crawler/schema.sql` — SQLite persistence layer (stdlib `sqlite3`, no ORM). Records are upserted by `link`: each run grows the archive instead of overwriting it, `first_seen` is preserved and `last_seen` is updated.
-- `crawler/errors.py` — the `CrawlerError` hierarchy (`FetchError`, `ParseError`, `StorageError`). Expected failures turn into a clear message and exit code 1; unexpected ones still raise a traceback.
+| Slug | Source |
+|---|---|
+| `cisa` | CISA (US) — Alert, ICS Advisory, Cybersecurity Advisory |
+| `cert-eu` | CERT-EU (EU) |
+| `cert-fr-avis` / `cert-fr-alerte` | CERT-FR / ANSSI (France) |
+| `jvn` | JVN / JPCERT/CC (Japan) |
+| `msrc` | Microsoft MSRC |
+| `cisco` | Cisco PSIRT |
 
-See [`docs/sources.md`](docs/sources.md) for researched/planned sources.
+Adding a source means adding one line to [`crawler/sources.py`](crawler/sources.py). Source research: [`docs/sources.md`](docs/sources.md).
 
 ## Setup
 
@@ -28,41 +30,49 @@ uv sync
 ## Usage
 
 ```bash
-# Scrape the CISA advisories page, persist to data/advisories.db and list them
-uv run python -m crawler.cisa
+uv run advcrawler --list-sources     # list sources
+uv run advcrawler --source cisa      # a single source
+uv run advcrawler --all              # every source
 ```
 
-Data is written to `data/advisories.db` (SQLite), not tracked in git. A successful run exits 0 and a failure exits 1, so scheduled runs (cron/CI) can catch problems.
+Data is written to `data/advisories.db` (SQLite), not tracked in git. A successful run exits 0 and a failure exits 1, so scheduled runs (cron/CI) can catch problems. Under `--all`, one source failing does not stop the others.
 
-To migrate legacy `data/cisa.json` data (one-off):
-
-```bash
-uv run python -m scripts.migrate_json_to_sqlite
-```
+Optional: if `ADVCRAWLER_CONTACT` is set, a contact address is added to the User-Agent.
 
 ## Schema
 
 | Table | Purpose |
 |---|---|
-| `sources` | Sources (`cisa`, `cert-eu`, …) — for the multi-source design |
+| `sources` | Sources (`cisa`, `cert-eu`, …) |
 | `advisories` | Advisory records; `link` is unique (the dedupe key), `first_seen`/`last_seen` are tracked |
-| `cves` + `advisory_cves` | CVEs and their many-to-many link to advisories. Schema is ready; population comes once detail pages are parsed |
+| `cves` + `advisory_cves` | CVEs extracted from advisory titles and summaries (many-to-many) |
 | `crawl_runs` | One row per run: status, new record count, error message |
 
-Full DDL: [`crawler/schema.sql`](crawler/schema.sql)
+Full DDL: [`crawler/schema.sql`](crawler/schema.sql). Schema changes ship as `PRAGMA user_version` migrations ([`crawler/migrations.py`](crawler/migrations.py)) — existing databases are upgraded automatically.
+
+## Development
+
+```bash
+uv run --group dev pytest      # tests (no network needed, they run on fixtures)
+uv run --group dev ruff check .
+```
 
 ## Structure
 
 ```
 crawler/
-  http_client.py   # shared HTTP client (User-Agent) + fetch_text
-  cisa.py          # CISA RSS + HTML scraper
-  db.py            # SQLite persistence (upsert, run logging)
+  cli.py           # command-line interface
+  pipeline.py      # per-source run flow (fetch -> parse -> derive -> store)
+  sources.py       # source definitions
+  rss.py           # RSS 2.0 / RDF parsing (namespace-agnostic)
+  cve.py           # CVE id extraction
+  cisa.py          # CISA-specific: category derivation + HTML scraper (for backfill)
+  db.py            # SQLite persistence
+  migrations.py    # schema migrations
   schema.sql       # table definitions
+  http_client.py   # shared HTTP client (User-Agent)
   errors.py        # CrawlerError hierarchy
-scripts/
-  migrate_json_to_sqlite.py
-data/              # crawler output, SQLite file (not tracked in git)
-docs/
-  sources.md       # source research (RSS/API/scraping status)
+tests/             # fixtures are real feed/HTML snapshots
+data/              # SQLite file (not tracked in git)
+docs/sources.md    # source research
 ```

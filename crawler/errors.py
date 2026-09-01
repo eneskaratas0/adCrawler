@@ -1,4 +1,7 @@
-"""Crawler'a özgü hata tipleri. Beklenen hatalar bunlara sarılır, beklenmeyenler olduğu gibi yükselir."""
+"""Crawler'a özgü hata tipleri.
+
+Beklenen hatalar bunlara sarılır, beklenmeyenler olduğu gibi yükselir.
+"""
 
 
 class CrawlerError(Exception):
